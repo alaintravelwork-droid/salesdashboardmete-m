@@ -674,7 +674,7 @@ function todayItems(){const t=today(),t1=addDays(t,1),o=[],sf=x=>!saleSel||(x.sa
 // boot
 render();
 (async()=>{const er=e=>String((e&&(e.message||e.code))||e);
- if(typeof claude==="undefined"){LOCAL=true;try{const a=JSON.parse(localStorage.getItem("ms_quotes_v1")||"[]");Q=a.filter(x=>!x.deleted);TR=a.filter(x=>x.deleted)}catch(e){}try{const j=JSON.parse(localStorage.getItem("ms_x_v1")||"{}");["posts","calls","kpis"].forEach(n=>X[n].a=j[n]||[])}catch(e){}render();msg("Đang chạy độc lập (ngoài Claude): dữ liệu lưu ngay trong trình duyệt này. Hãy bấm 💾 Sao lưu để giữ bản dự phòng.");return}
+ if(typeof claude==="undefined"){LOCAL=true;try{const a=JSON.parse(localStorage.getItem("ms_quotes_v1")||"[]");Q=a.filter(x=>!x.deleted);TR=a.filter(x=>x.deleted)}catch(e){}try{const j=JSON.parse(localStorage.getItem("ms_x_v1")||"{}");["posts","calls","kpis"].forEach(n=>X[n].a=j[n]||[])}catch(e){}render();return}
  try{const u=await claude.use("user");if(u){me=await u.id();try{mgr=u.canEdit()}catch(e){}}}catch(e){}
  try{db=await claude.use("db")}catch(e){msg("Không kết nối được cơ sở dữ liệu chung: "+er(e));return}
  if(!db){msg("Chưa kết nối được cơ sở dữ liệu chung – dữ liệu chỉ lưu tạm trong phiên này.");return}
