@@ -135,6 +135,52 @@ td.pk{text-align:center;font-weight:600}td.pk.ok{background:#dcfce7;color:#16653
 <dialog id="cdlg"><p id="ctxt" style="margin:0 0 14px"></p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="cno">Hủy</button><button class="btn pri" id="cyes">Đồng ý</button></div></dialog>
 <dialog id="xdlg"><h3 id="xt" style="margin:0 0 12px"></h3><div class="f" id="xf"></div><div id="xerr" class="s" style="color:var(--rd);margin-top:8px"></div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn" id="xdel" style="color:var(--rd)">Xóa</button><span class="sp"></span><button class="btn" id="xcancel">Hủy</button><button class="btn pri" id="xsave">Lưu</button></div></dialog>
 <dialog id="rdlg" style="width:min(880px,96vw)"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px"><b style="font-size:15px">Báo cáo đầu việc Team Sales</b><span class="sp"></span><button class="btn" id="rzalo">💬 Soạn tin Zalo</button><button class="btn pri" id="rpdf">📄 Tải PDF</button><button class="btn" id="rclose">Đóng</button></div><label class="s" style="display:block;margin-bottom:8px">Lời nhắn gửi sếp (không bắt buộc, hiện ở đầu báo cáo)<input id="rnote" style="width:100%"></label><div id="rmsg" class="s" style="margin-bottom:6px;min-height:16px"></div><div style="max-height:62vh;overflow:auto"><div class="tw"><div class="sheet" id="rsheet"></div></div></div></dialog>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.99.3/dist/umd/supabase.js"></script>
+<script>
+/* ===== Kết nối Supabase: dữ liệu dùng chung cho mọi người ===== */
+(function(){
+ const SB_URL="https://qjowipcmfjsdeloaeewb.supabase.co";
+ const SB_KEY="sb_publishable_GFiqk3T4Remvipk2x7qTmA_xJXjTPvD";
+ if(typeof supabase==="undefined"||!supabase.createClient){console.warn("Không tải được thư viện Supabase");return}
+ const sb=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:false}});
+ // Mỗi bản ghi có id riêng của web (vd "i1abc"); bảng Supabase dùng uuid nên đổi id -> uuid cố định
+ async function uid(c,id){const h=new Uint8Array(await crypto.subtle.digest("SHA-1",new TextEncoder().encode(c+"/"+id))).slice(0,16);
+  h[6]=(h[6]&15)|80;h[8]=(h[8]&63)|128;const x=[...h].map(b=>b.toString(16).padStart(2,"0")).join("");
+  return x.slice(0,8)+"-"+x.slice(8,12)+"-"+x.slice(12,16)+"-"+x.slice(16,20)+"-"+x.slice(20)}
+ async function fetchAll(c){let out=[],from=0;const N=1000;
+  for(;;){const{data,error}=await sb.from("records").select("data").eq("collection",c).range(from,from+N-1);
+   if(error)throw error;out=out.concat(data);if(data.length<N)break;from+=N}
+  return out.map(r=>r.data).filter(d=>d&&d._id!=null)}
+ const subs={};let timer=null;const dirty=new Set();
+ async function refresh(c){const L=subs[c];if(!L)return;try{const rows=await fetchAll(c);
+  const snap={docs:rows.map(d=>{const{_id,...o}=d;return{id:_id,data:()=>o}})};L.forEach(l=>{try{l.ok(snap)}catch(e){}})}
+  catch(e){L.forEach(l=>{try{l.err&&l.err(e)}catch(_){}})}}
+ function soon(c){if(c)dirty.add(c);else Object.keys(subs).forEach(k=>dirty.add(k));clearTimeout(timer);
+  timer=setTimeout(()=>{const a=[...dirty];dirty.clear();a.forEach(refresh)},300)}
+ // Cập nhật tức thì khi người khác thêm/sửa/xóa
+ sb.channel("records-all").on("postgres_changes",{event:"*",schema:"public",table:"records"},p=>{
+  const c=(p.new&&p.new.collection)||(p.old&&p.old.collection);soon(c||null)}).subscribe();
+ // Dự phòng: tự làm mới mỗi 30 giây và khi quay lại tab
+ setInterval(()=>soon(null),30000);
+ document.addEventListener("visibilitychange",()=>{if(!document.hidden)soon(null)});
+ window.SBDB={collection(c){return{
+  doc(id){return{
+   async set(o){const{error}=await sb.from("records").upsert({id:await uid(c,id),collection:c,data:{...o,_id:id},updated_at:new Date().toISOString()});if(error)throw error;soon(c)},
+   async delete(){const{error}=await sb.from("records").delete().eq("id",await uid(c,id));if(error)throw error;soon(c)}}},
+  onSnapshot(ok,err){(subs[c]=subs[c]||[]).push({ok,err});refresh(c);return()=>{subs[c]=subs[c].filter(l=>l.ok!==ok)}}}}};
+ // Chuyển dữ liệu cũ đang nằm trong trình duyệt (bản trước) lên Supabase – chỉ hỏi 1 lần
+ window.SB_MIGRATE=async function(XN){try{if(localStorage.getItem("ms_sb_migrated_v2"))return;
+  const q=JSON.parse(localStorage.getItem("ms_quotes_v1")||"[]"),x=JSON.parse(localStorage.getItem("ms_x_v1")||"{}");
+  // Chỉ đưa lên bản ghi chưa có trên dữ liệu chung, hoặc bản trên máy mới hơn – không ghi đè dữ liệu mới của người khác
+  const todo=[];for(const [c,arr] of [["quotes",q],...XN.map(k=>[k,x[k]||[]])]){if(!arr.length)continue;
+   const rem=new Map((await fetchAll(c)).map(d=>[String(d._id),d]));
+   for(const r of arr){if(r.id==null)continue;const o=rem.get(String(r.id));if(!o||(r.updated&&o.updated&&r.updated>o.updated))todo.push([c,r])}}
+  if(!todo.length){localStorage.setItem("ms_sb_migrated_v2","1");return}
+  if(!confirm("Trình duyệt này có "+todo.length+" bản ghi chỉ lưu trên máy bạn (chưa có trên dữ liệu chung). Đưa lên để mọi người cùng thấy?"))return;
+  const D=window.SBDB;for(const [c,r] of todo){const{id,...o}=r;await D.collection(c).doc(id).set(o)}
+  localStorage.setItem("ms_sb_migrated_v2","1");alert("Đã đưa "+todo.length+" bản ghi lên dữ liệu chung.")}catch(e){alert("Chuyển dữ liệu cũ bị lỗi: "+(e.message||e))}}
+})();
+</script>
 <script>
 const ST={draft:"Đang soạn",sent:"Đã gửi",waiting:"Chờ phản hồi",negotiating:"Đàm phán",won:"Chốt",lost:"Cancelled/Fail"};
 const OPEN=["sent","waiting","negotiating"];
@@ -480,7 +526,7 @@ $("file").onchange=async e=>{const f=e.target.files[0];if(!f)return;const rows=p
  msg(`Đã import ${n} báo giá. Dùng nút Xuất CSV để xem file mẫu đầy đủ các cột.`);e.target.value=""};
 $("exp").onclick=async()=>{const esc2=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
  const csv="\uFEFF"+[HV.join(","),...mine().map(q=>HD.map(k=>esc2(k==="status"?ST[q.status]:xv(q,k))).join(","))].join("\n");
- try{const d=await claude.use("downloads");if(d)await d.save({filename:"bao-gia-"+today()+".csv",data:csv});else msg("Xuất file không khả dụng trong chế độ xem này.")}catch(e){if(e&&e.code!=="declined")msg("Không xuất được: "+(e.message||e.code))}};
+ try{await dlFile("bao-gia-"+today()+".csv",csv,"text/csv")}catch(e){if(e&&e.code!=="declined")msg("Không xuất được: "+(e.message||e.code))}};
 const MONTHS={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
 const DESTN={S:'Singapore',M:'Malaysia',SM:'Singapore - Malaysia',MS:'Malaysia - Singapore',BA:'Bali',JAK:'Jakarta',IN:'Indonesia',THA:'Thailand',CHI:'China',PHI:'Philippines'};
 const isoD=(y,m,d)=>{const t=new Date(Date.UTC(y,m-1,d));return t.getUTCMonth()===m-1&&t.getUTCDate()===d?t.toISOString().slice(0,10):''};
@@ -1034,12 +1080,13 @@ goTab("dsh");
 // boot
 render();
 (async()=>{const er=e=>String((e&&(e.message||e.code))||e);
- if(typeof claude==="undefined"){LOCAL=true;try{const a=JSON.parse(localStorage.getItem("ms_quotes_v1")||"[]");Q=a.filter(x=>!x.deleted);TR=a.filter(x=>x.deleted)}catch(e){}try{const j=JSON.parse(localStorage.getItem("ms_x_v1")||"{}");XN.forEach(n=>X[n].a=j[n]||[])}catch(e){}render();return}
- try{const u=await claude.use("user");if(u){me=await u.id();try{mgr=u.canEdit()}catch(e){}}}catch(e){}
- try{db=await claude.use("db")}catch(e){msg("Không kết nối được cơ sở dữ liệu chung: "+er(e));return}
+ if(typeof claude==="undefined"&&!window.SBDB){LOCAL=true;try{const a=JSON.parse(localStorage.getItem("ms_quotes_v1")||"[]");Q=a.filter(x=>!x.deleted);TR=a.filter(x=>x.deleted)}catch(e){}try{const j=JSON.parse(localStorage.getItem("ms_x_v1")||"{}");XN.forEach(n=>X[n].a=j[n]||[])}catch(e){}render();return}
+ if(typeof claude!=="undefined")try{const u=await claude.use("user");if(u){me=await u.id();try{mgr=u.canEdit()}catch(e){}}}catch(e){}
+ try{db=window.SBDB||await claude.use("db")}catch(e){msg("Không kết nối được cơ sở dữ liệu chung: "+er(e));return}
  if(!db){msg("Chưa kết nối được cơ sở dữ liệu chung – dữ liệu chỉ lưu tạm trong phiên này.");return}
  col=db.collection("quotes");
  XN.forEach(n=>{try{X[n].c=db.collection(n);X[n].c.onSnapshot(sn=>{X[n].a=sn.docs.map(d=>({id:d.id,...d.data()}));render()},e=>msg("Lỗi đồng bộ "+n+": "+er(e)))}catch(e){msg("Lỗi kết nối "+n+": "+er(e))}});
+ if(window.SBDB&&window.SB_MIGRATE)SB_MIGRATE(XN);
  try{col.onSnapshot(s=>{try{const AL=s.docs.map(d=>({id:d.id,...d.data()}));Q=AL.filter(x=>!x.deleted);TR=AL.filter(x=>x.deleted);msg("");render()}catch(e){msg("Lỗi hiển thị dữ liệu: "+er(e))}},e=>msg("Lỗi đồng bộ: "+er(e)))}catch(e){msg("Lỗi đồng bộ: "+er(e))}
 })();
 </script></body></html>
